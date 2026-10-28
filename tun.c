@@ -23,6 +23,9 @@
 int tun_open(char *device);
 void print_packet(const unsigned char *buffer, ssize_t length);
 
+
+// gcc -Wall -DTUN_STANDALONE -o tun tun.c
+#ifdef TUN_STANDALONE // so we can compile it on its own
 int main(int argc, char **argv) {
     char device[16] = "ez0";
     if (argc > 1) {
@@ -56,6 +59,7 @@ int main(int argc, char **argv) {
     close(fd);
     return 0;
 }
+#endif
 
 int tun_open(char *device) {
     int fd = open("/dev/net/tun", O_RDWR);
