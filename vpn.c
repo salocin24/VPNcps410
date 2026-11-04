@@ -21,6 +21,7 @@ static atomic_int       g_running = 0;      // threads loop while this is 1
 static int              g_tun_fd = -1;      // file descriptor from tun_open()
 static int              g_sock_fd = -1;     // udp socket bound to listen_port
 static pthread_t        g_tx_thread;
+static pthread_t        g_rx_thread;
 
 // internal peer record, the vpn_peer_t from python, plus the
 // endpoint converted to a sockaddr_in so sendto() can use it directly
@@ -118,6 +119,78 @@ static void *tx_thread(void *arg) {
     return NULL;
 }
 
+// TODO: rx_thread: UDP from peer -> "decrypt" -> tunnel
+// the mirror image of tx_thread, same poll() but on the socket instead
+
+static void *rx_thread(void *arg) {
+    (void)arg;
+    unsigned char buffer[MTU];
+    struct pollfd pfd = {
+        .fd = g_sock_fd,
+        .events = POLLIN
+    };
+
+    while(g_running) {
+        int ready = poll(&pfd, 1, 500);
+        if (ready < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("poll");
+            break;
+        }
+        if (ready == 0) {
+            continue;
+        }
+
+        // recvfrom also tells us WHO sent it, which we'll save
+        // for later to match the packet to a peer
+        struct sockaddr_in from;
+        socklen_t from_len = sizeof(from);
+        ssize_t length = recvfrom(g_sock_fd, buffer, sizeof(buffer), 0, (struct sockaddr *)&from, &from_len);
+        if (length < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            perror("recvfrom");
+            break;
+        }
+
+        // again, decrypt here. once we have crypto, a packet that fails to
+        // decrypt gets dropped, which is also how we'll knwo that it came from a real peer.
+        // for now we accept plaintext from anyone.
+
+        // check for a whole ipv4 header
+        // same version check as print_packet in tun.c
+        if (length < 20 || (buffer[0] >> 4) != 4) {
+            pthread_mutex_lock(&g_stats_lock);
+            g_stats.dropped++;
+            pthread_mutex_unlock(&g_stats_lock);
+            continue;
+        }
+
+        if (g_cfg.debug) {
+            print_packet(buffer, length);
+        }
+
+        // writing to the tun file descriptor hands the packet to the kernel,
+        // which delivers it as if it arrived on ez0
+        if (write(g_tun_fd, buffer, length) < 0) {
+            perror("write");
+            pthread_mutex_lock(&g_stats_lock);
+            g_stats.dropped++;
+            pthread_mutex_unlock(&g_stats_lock);
+            continue;
+        }
+
+        pthread_mutex_lock(&g_stats_lock);
+        g_stats.rx_packets++;
+        g_stats.rx_bytes += length;
+        pthread_mutex_unlock(&g_stats_lock);
+    }
+    return NULL;
+}
+
 // lifecycle
 
 int vpn_init(vpn_config_t *cfg) {
@@ -179,6 +252,15 @@ int vpn_start(void) {
         g_sock_fd = g_tun_fd = -1;
         return VPN_ERR_THREAD;
     }
+    if (pthread_create(&g_rx_thread, NULL, rx_thread, NULL) != 0) {
+        // then tx is already running, so stop it b4 cleaning up
+        g_running = 0;
+        pthread_join(g_tx_thread, NULL);
+        close(g_sock_fd);
+        close(g_tun_fd);
+        g_sock_fd = g_tun_fd = -1;
+        return VPN_ERR_THREAD;
+    }
 
     return VPN_OK;
 }
@@ -190,6 +272,7 @@ int vpn_stop(void) {
 
     g_running = 0;                  // tell the thread to finish
     pthread_join(g_tx_thread, NULL); // wait for it to join
+    pthread_join(g_rx_thread, NULL);
 
     close(g_sock_fd);
     close(g_tun_fd);
