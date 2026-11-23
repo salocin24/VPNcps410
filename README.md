@@ -27,6 +27,7 @@ It's a C library (`libvpn.so`) that does the networking, with a Python GUI on to
 
 | File | What it is |
 |---|---|
+| `Makefile` | Builds the library and test program, and runs the namespace test |
 | `vpn.h` | The public API, i.e. every function and struct Python can use. Start here. |
 | `vpn.c` | The library: lifecycle, peers, and the TX/RX threads |
 | `tun.c` / `tun.h` | Creates and attaches to the TUN device |
@@ -42,24 +43,25 @@ It's a C library (`libvpn.so`) that does the networking, with a Python GUI on to
 ## Build
 
 ```
-gcc -Wall -Werror -fPIC -shared -o libvpn.so vpn.c tun.c -lpthread
-gcc -Wall -Werror -o test_cli test_cli.c -L. -lvpn -Wl,-rpath,.
+make
 ```
 
-`tun.c` can also be built on its own for testing the TUN device by itself:
+This builds `libvpn.so` and `test_cli`. Other targets:
 
 ```
-gcc -Wall -DTUN_STANDALONE -o tun tun.c
+make tun      # builds tun.c on its own, for testing the TUN device by itself
+make clean    # removes build files
 ```
+
+If `make` isn't installed: `sudo apt install make`
 
 ## Test
 
 ```
-chmod +x netns_test.sh
-sudo ./netns_test.sh
+make test
 ```
 
-This creates two network namespaces (fake machines at `192.168.50.1` and `192.168.50.2`), runs `test_cli` on each, and pings across the tunnel. A pass looks like `3 received, 0% packet loss`, with both logs ending in `stopped`.
+This builds everything, then creates two network namespaces (fake machines at `192.168.50.1` and `192.168.50.2`), runs `test_cli` on each, and pings across the tunnel. It asks for your sudo password. A pass looks like `3 received, 0% packet loss`, with both logs ending in `stopped`.
 
 To run the test program by hand:
 
@@ -88,7 +90,8 @@ The structs in `vpn.h` must be mirrored exactly in Python with `ctypes.Structure
 - [x] TUN device
 - [x] Library API (`vpn.h`)
 - [x] TX/RX threads over UDP (plaintext)
-- [ ] Makefile and `setup.sh` (run without sudo)
+- [x] Makefile
+- [ ] `setup.sh` (run without sudo)
 - [ ] `vpn.py` ctypes wrapper and GUI
 - [ ] Encryption (ChaCha20-Poly1305 via libsodium)
 - [ ] Handshake and key exchange
