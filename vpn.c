@@ -343,6 +343,10 @@ int vpn_add_peer(const vpn_peer_t *peer) {
     return VPN_OK;
 }
 
+// vpn_remove_peer(const uint8_t public_key[VPN_KEY_LEN]); will eventually go here, just not
+// implemented yet. the ctypes implementation will crash at the moment since this isn't
+// implemented, but not too important since we're just testing right now.
+
 int vpn_get_peer_count(void) {
     pthread_mutex_lock(&g_peers_lock);
     int n = g_peer_count;
